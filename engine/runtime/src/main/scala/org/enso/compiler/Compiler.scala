@@ -31,9 +31,9 @@ import scala.jdk.OptionConverters._
   *
   * @param context the language context
   */
-class Compiler(val context: Context, private val builtins: Builtins) {
+class Compiler(val context: Context, private val builtins: Builtins, autoParallelismEnabled: Boolean) {
   private val freshNameSupply: FreshNameSupply = new FreshNameSupply
-  private val passes: Passes                   = new Passes
+  private val passes: Passes                   = new Passes(autoParallelismEnabled)
   private val passManager: PassManager         = passes.passManager
   private val importResolver: ImportResolver   = new ImportResolver(this)
   private val stubsGenerator: RuntimeStubsGenerator =

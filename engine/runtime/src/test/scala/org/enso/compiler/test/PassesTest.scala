@@ -35,7 +35,7 @@ class PassesTest extends CompilerTest {
   // === The Tests ============================================================
 
   "Compiler pass ordering slicing" should {
-    val passes = new Passes
+    val passes = new Passes()
 
     "get the precursors of a given pass" in {
       passes.getPrecursors(AliasAnalysis).map(_.passes) shouldEqual Some(

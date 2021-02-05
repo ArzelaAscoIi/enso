@@ -17,7 +17,12 @@ import org.enso.compiler.pass.{
   PassManager
 }
 
-class Passes(passes: Option[List[PassGroup]] = None) {
+import scala.annotation.unused
+
+class Passes(
+  @unused autoParallelismEnabled: Boolean = false,
+  passes: Option[List[PassGroup]]         = None
+) {
 
   val moduleDiscoveryPasses = new PassGroup(
     List(
@@ -60,7 +65,16 @@ class Passes(passes: Option[List[PassGroup]] = None) {
       Patterns,
       AliasAnalysis,
       UndefinedVariables,
-      DataflowAnalysis,
+      DataflowAnalysis
+    ) ++
+    (if (autoParallelismEnabled) {
+       List(
+         AutomaticParallelism,
+         AliasAnalysis,
+         DataflowAnalysis
+       )
+     } else List()) ++
+    List(
       CachePreferenceAnalysis,
       UnusedBindings
     )
@@ -79,7 +93,8 @@ class Passes(passes: Option[List[PassGroup]] = None) {
   /** Configuration for the passes. */
   private val passConfig: PassConfiguration = PassConfiguration(
     ApplicationSaturation -->> ApplicationSaturation.Configuration(),
-    AliasAnalysis         -->> AliasAnalysis.Configuration()
+    AliasAnalysis         -->> AliasAnalysis.Configuration(),
+    AutomaticParallelism  -->> AutomaticParallelism.Configuration(true)
   )
 
   /** The pass manager for running compiler passes. */
