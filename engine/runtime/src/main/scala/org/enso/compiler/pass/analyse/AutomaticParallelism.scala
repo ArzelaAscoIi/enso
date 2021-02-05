@@ -56,6 +56,7 @@ object AutomaticParallelism extends IRPass {
   ): IR.Expression = ir
 
   // TODO [AA] This can probably just work on blocks with assigned metadata.
+  //  The metadata would have to contain the traces of the parallel flows.
 
   // === Pass Configuration ===================================================
 
