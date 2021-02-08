@@ -1,6 +1,5 @@
 package org.enso.interpreter.runtime;
 
-import com.google.common.collect.HashBiMap;
 import com.oracle.truffle.api.CompilerDirectives.CompilationFinal;
 import com.oracle.truffle.api.TruffleFile;
 import com.oracle.truffle.api.TruffleLanguage;
@@ -15,16 +14,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.enso.compiler.Compiler;
+import org.enso.compiler.data.CompilerConfig;
 import org.enso.home.HomeManager;
 import org.enso.interpreter.Language;
 import org.enso.interpreter.OptionsHelper;
 import org.enso.interpreter.runtime.builtin.Builtins;
 import org.enso.interpreter.runtime.callable.atom.AtomConstructor;
 import org.enso.interpreter.runtime.scope.TopLevelScope;
-import org.enso.interpreter.runtime.type.Types.Pair;
 import org.enso.interpreter.runtime.util.ShadowedPackage;
 import org.enso.interpreter.runtime.util.TruffleFileSystem;
 import org.enso.interpreter.util.ScalaConversions;
@@ -32,10 +32,6 @@ import org.enso.pkg.Package;
 import org.enso.pkg.PackageManager;
 import org.enso.pkg.QualifiedName;
 import org.enso.polyglot.RuntimeOptions;
-
-import java.io.*;
-import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * The language context is the internal state of the language that is associated with each thread in
@@ -55,10 +51,10 @@ public class Context {
   private final ThreadManager threadManager;
   private final ResourceManager resourceManager;
   private final boolean isCachingDisabled;
-  private final boolean isAutomaticParallelismEnabled;
   private final Builtins builtins;
   private final String home;
   private final List<ShadowedPackage> shadowedPackages;
+  private final CompilerConfig compilerConfig;
 
   /**
    * Creates a new Enso context.
@@ -76,14 +72,15 @@ public class Context {
     this.threadManager = new ThreadManager();
     this.resourceManager = new ResourceManager(this);
     this.isCachingDisabled = environment.getOptions().get(RuntimeOptions.DISABLE_INLINE_CACHES_KEY);
-    this.isAutomaticParallelismEnabled =
+    var isAutomaticParallelismEnabled =
         environment.getOptions().get(RuntimeOptions.ENABLE_AUTO_PARALLELISM_KEY);
+    this.compilerConfig = new CompilerConfig(isAutomaticParallelismEnabled, true);
     this.home = home;
     this.shadowedPackages = new ArrayList<>();
 
     builtins = new Builtins(this);
 
-    this.compiler = new Compiler(this, builtins, this.isAutomaticParallelismEnabled);
+    this.compiler = new Compiler(this, builtins, compilerConfig);
   }
 
   /** Perform expensive initialization logic for the context. */
@@ -395,6 +392,11 @@ public class Context {
 
   /** @return whether the automated parallelism discovery should be enabled for this context. */
   public boolean isAutomaticParallelismEnabled() {
-    return isAutomaticParallelismEnabled;
+    return getEnvironment().getOptions().get(RuntimeOptions.ENABLE_AUTO_PARALLELISM_KEY);
+  }
+
+  /** @return the compiler configuration for this language */
+  public CompilerConfig getCompilerConfig() {
+    return compilerConfig;
   }
 }
