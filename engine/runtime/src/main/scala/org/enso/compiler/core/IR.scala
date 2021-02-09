@@ -1431,6 +1431,88 @@ object IR {
       }
     }
 
+    /** A serial stream is a series of computations in the IR that can be
+      * executed in series.
+      *
+      * @param expressions the expressions to be executed in sequence.
+      * @param location the source location to which the node corresponds
+      * @param passData the pass metadata associated with this node
+      * @param diagnostics compiler diagnostics for this node
+      */
+    sealed case class SerialStream(
+      expressions: List[Expression],
+      override val location: Option[IdentifiedLocation],
+      override val passData: MetadataStorage      = MetadataStorage(),
+      override val diagnostics: DiagnosticStorage = DiagnosticStorage()
+    ) extends Expression
+        with IRKind.Primitive {
+      override protected var id: Identifier = randomId
+
+      /** Creates a copy of `this`.
+        *
+        * @param expressions the expressions to be executed in sequence.
+        * @param location the source location to which the node corresponds
+        * @param passData the pass metadata associated with this node
+        * @param diagnostics compiler diagnostics for this node
+        * @param id the identifier for the new node
+        * @return a copy of `this`, updated with the specified values
+        */
+      def copy(
+        expressions: List[Expression]        = expressions,
+        location: Option[IdentifiedLocation] = location,
+        passData: MetadataStorage            = passData,
+        diagnostics: DiagnosticStorage       = diagnostics,
+        id: Identifier                       = id
+      ): SerialStream = {
+        val res = SerialStream(expressions, location, passData, diagnostics)
+        res.id = id
+        res
+      }
+
+      override def duplicate(
+        keepLocations: Boolean   = true,
+        keepMetadata: Boolean    = true,
+        keepDiagnostics: Boolean = true
+      ): SerialStream =
+        copy(
+          expressions = expressions.map(
+            _.duplicate(keepLocations, keepMetadata, keepDiagnostics)
+          ),
+          location = if (keepLocations) location else None,
+          passData =
+            if (keepMetadata) passData.duplicate else MetadataStorage(),
+          diagnostics =
+            if (keepDiagnostics) diagnostics.copy else DiagnosticStorage(),
+          id = randomId
+        )
+
+      override def setLocation(
+        location: Option[IdentifiedLocation]
+      ): SerialStream = copy(location = location)
+
+      override def mapExpressions(
+        fn: Expression => Expression
+      ): SerialStream = {
+        copy(expressions = expressions.map(fn))
+      }
+
+      override def toString: String =
+        s"""IR.Expression.SerialStream(
+           |expressions = $expressions,
+           |location = $location,
+           |passData = $passData,
+           |diagnostics = $diagnostics,
+           |id = $id
+           |)
+           |""".toSingleLine
+
+      override def children: List[IR] = expressions
+
+      override def showCode(indent: Int): String = {
+        expressions.map(mkIndent(indent) + _.showCode(indent)).mkString("\n")
+      }
+    }
+
     /** A binding expression of the form `name = expr`
       *
       * To create a binding that binds no available name, set the name of the

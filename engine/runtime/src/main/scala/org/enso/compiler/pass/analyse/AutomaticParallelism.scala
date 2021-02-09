@@ -55,8 +55,23 @@ object AutomaticParallelism extends IRPass {
     inlineContext: InlineContext
   ): IR.Expression = ir
 
-  // TODO [AA] This can probably just work on blocks with assigned metadata.
-  //  The metadata would have to contain the traces of the parallel flows.
+  // If I can do the limited form, then it is sufficient to have spawn/await on
+  //  bindings combined with liberal inlining of the other parts of the
+  //  computation.
+  //  - At the binding, spawn a thread and store an identifier into the cell.
+  //  - At the read emit a special ReadVariableNode that joins on that thread.
+  //  This becomes even easier if I can make assumptions about where the
+  //  annotated expression is, but that isn't necessary for this approach.
+
+  // The assumptions are:
+  // - There are no observable side effects between the flows.
+  // - The result does not need to function in the IDE.
+
+  // The restrictions are:
+  // - All dependencies must be defined in the same function.
+  // - Dependencies may not be used except in the @Auto_Parallel computation.
+
+  // TODO [AA] Warn when an annotation exists but cannot be done.
 
   // === Pass Configuration ===================================================
 
