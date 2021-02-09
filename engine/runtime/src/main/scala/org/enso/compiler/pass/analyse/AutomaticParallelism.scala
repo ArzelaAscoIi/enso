@@ -70,6 +70,11 @@ object AutomaticParallelism extends IRPass {
   // The restrictions are:
   // - All dependencies must be defined in the same function.
   // - Dependencies may not be used except in the @Auto_Parallel computation.
+  // - Dependencies must be inlineable.
+  // - Mapping from UUID to IR Node?
+
+  // The steps are as follows:
+  // 1. Walk over the IR, building a mapping from UUID to node along the way.
 
   // TODO [AA] Warn when an annotation exists but cannot be done.
 
