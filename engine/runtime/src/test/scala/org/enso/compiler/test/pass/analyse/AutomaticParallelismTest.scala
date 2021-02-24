@@ -3,6 +3,7 @@ package org.enso.compiler.test.pass.analyse
 import org.enso.compiler.Passes
 import org.enso.compiler.context.{FreshNameSupply, ModuleContext}
 import org.enso.compiler.core.IR
+import org.enso.compiler.core.IR.Module.Scope.Definition
 import org.enso.compiler.data.CompilerConfig
 import org.enso.compiler.pass.PassConfiguration.ToPair
 import org.enso.compiler.pass.analyse.{AliasAnalysis, AutomaticParallelism}
@@ -38,6 +39,48 @@ class AutomaticParallelismTest extends CompilerTest {
 
   // === The Tests ============================================================
 
-  "Automatic parallelism analysis" should {}
+  "Successful parallelism analysis" should {
+    implicit val moduleContext: ModuleContext = mkModuleContext
 
+    val code =
+      """
+        |fn f g =
+        |    x = File.read "foo"
+        |    y = File.read "bar"
+        |    a = f x
+        |    b = g y
+        |
+        |    @Auto_Parallel a.n b
+        |""".stripMargin.preprocessModule.analyse
+
+    val methodBody =
+      code.bindings.head.asInstanceOf[Definition.Method.Explicit].body
+    println(methodBody.showCode())
+
+    "determine the separated flows" in {
+      pending
+    }
+
+    "inline the flows" in {
+      pending
+    }
+
+    "associate correct metadata with the block" in {
+      pending
+    }
+  }
+
+  "Failed parallelism analysis" should {
+    "raise an error when an intermediary is used outside the streams" in {
+      pending
+    }
+
+    "raise an error when dependencies cannot be inlined" in {
+      pending
+    }
+
+    "raise an error when dependencies are used outside the @Auto_Parallel call" in {
+      pending
+    }
+  }
 }

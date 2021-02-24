@@ -49,4 +49,21 @@ object InlineContext {
       compilerConfig   = compilerConfig
     )
   }
+
+  /** Transform a module context into an inline context, retaining the useful
+    * information.
+    *
+    * @param moduleContext the module context
+    * @return an inline context wrapping the same data as `moduleContext`
+    */
+  def fromModuleContext(moduleContext: ModuleContext): InlineContext = {
+    InlineContext(
+      localScope        = None,
+      module            = moduleContext.module,
+      isInTailPosition  = None,
+      freshNameSupply   = moduleContext.freshNameSupply,
+      passConfiguration = moduleContext.passConfiguration,
+      compilerConfig    = moduleContext.compilerConfig
+    )
+  }
 }

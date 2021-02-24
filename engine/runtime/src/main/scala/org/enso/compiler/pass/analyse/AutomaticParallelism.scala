@@ -2,12 +2,18 @@ package org.enso.compiler.pass.analyse
 
 import org.enso.compiler.context.{InlineContext, ModuleContext}
 import org.enso.compiler.core.IR
+import org.enso.compiler.core.IR.Module.Scope.Definition
+import org.enso.compiler.core.IR.{Error, Name, Type}
+import org.enso.compiler.exception.CompilerError
 import org.enso.compiler.pass.IRPass
+import org.enso.compiler.pass.desugar.ComplexType
+
+import scala.annotation.unused
 
 /** This pass is responsible for discovering occurrences of automatically
-  * parallelisable computations. If it finds a join point, annotated with the
-  * `@Auto_Parallel` annotation, it will discover the incoming computations that
-  * can safely be parallelised.
+  * parallelizable computations. If it finds a join point, annotated with the
+  * &#96;@Auto_Parallel&#96; annotation, it will discover the incoming
+  * computations that can safely be parallelized.
   *
   * This is a limited process, and operates under the following core
   * assumptions:
@@ -16,13 +22,22 @@ import org.enso.compiler.pass.IRPass
   *   diamond patterns).
   * - The incoming edges perform no side-effecting computations that would be
   *   observable from the other edges.
+  * - This functionality does not have to operate in the IDE.
+  *
+  * Additionally, it will only trigger when the following conditions hold:
+  *
+  * - All dependent names are defined in the same method.
+  * - The dependencies of the `@Auto_Parallel` computation may not be used
+  *   except for inside the annotated call.
+  * - The dependencies must be able to be inlined.
   */
 object AutomaticParallelism extends IRPass {
   override type Metadata = IRPass.Metadata.Empty
   override type Config   = Configuration
   override val precursorPasses: Seq[IRPass] = Seq(
     AliasAnalysis,
-    DataflowAnalysis
+    DataflowAnalysis,
+    ComplexType
   )
   override val invalidatedPasses: Seq[IRPass] = Seq(
     AliasAnalysis,
@@ -40,7 +55,12 @@ object AutomaticParallelism extends IRPass {
   override def runModule(
     ir: IR.Module,
     moduleContext: ModuleContext
-  ): IR.Module = ir
+  ): IR.Module = {
+    val inlineContext = InlineContext.fromModuleContext(moduleContext)
+    ir.copy(bindings =
+      ir.bindings.map(processModuleDefinition(_, inlineContext))
+    )
+  }
 
   /** Executes the pass on an expression.
     *
@@ -63,20 +83,51 @@ object AutomaticParallelism extends IRPass {
   //  This becomes even easier if I can make assumptions about where the
   //  annotated expression is, but that isn't necessary for this approach.
 
-  // The assumptions are:
-  // - There are no observable side effects between the flows.
-  // - The result does not need to function in the IDE.
+  // TODO [AA] The steps are as follows:
+  //   1. Walk over the IR, building a mapping from UUID to node along the way.
+  //   2. Get the dependency sets and ensure that they are disjoint.
+  //   3. Perform inlining.
+  //   4. Annotate the block with the parallel streams (structure TBC)
+  //   5. Emit a warning when the annotation cannot be obeyed.
+  //   6. Docs and cleanup
 
-  // The restrictions are:
-  // - All dependencies must be defined in the same function.
-  // - Dependencies may not be used except in the @Auto_Parallel computation.
-  // - Dependencies must be inlineable.
-  // - Mapping from UUID to IR Node?
+  // === Pass Implementation ==================================================
 
-  // The steps are as follows:
-  // 1. Walk over the IR, building a mapping from UUID to node along the way.
-
-  // TODO [AA] Warn when an annotation exists but cannot be done.
+  def processModuleDefinition(
+    binding: Definition,
+    @unused inlineContext: InlineContext
+  ): Definition = {
+    binding match {
+      case method: Definition.Method.Explicit => method
+      case atom: Definition.Atom              => atom
+      case _: Definition.Type =>
+        throw new CompilerError(
+          "Complex type definitions should not be present at the point of " +
+          "parallelism analysis."
+        )
+      case _: Definition.Method.Binding =>
+        throw new CompilerError(
+          "Binding-style methods should be desugared by the point of " +
+          "parallelism analysis."
+        )
+      case _: Name.Annotation =>
+        throw new CompilerError(
+          "Annotations should be desugared by the point of parallelism " +
+          "analysis."
+        )
+      case _: Type.Ascription =>
+        throw new CompilerError(
+          "Type ascriptions should be desugared by the point of parallelism " +
+          "analysis."
+        )
+      case _: IR.Comment =>
+        throw new CompilerError(
+          "Type ascriptions should be desugared by the point of parallelism " +
+          "analysis."
+        )
+      case err: Error => err
+    }
+  }
 
   // === Pass Configuration ===================================================
 
