@@ -9,6 +9,7 @@ import org.enso.compiler.pass.IRPass
 import org.enso.compiler.pass.desugar.ComplexType
 
 import scala.annotation.unused
+import scala.collection.mutable
 
 /** This pass is responsible for discovering occurrences of automatically
   * parallelizable computations. If it finds a join point, annotated with the
@@ -73,7 +74,10 @@ object AutomaticParallelism extends IRPass {
   override def runExpression(
     ir: IR.Expression,
     inlineContext: InlineContext
-  ): IR.Expression = ir
+  ): IR.Expression = {
+    val expressionMap: IrMap = mutable.Map()
+    processExpression(ir, inlineContext, expressionMap)
+  }
 
   // If I can do the limited form, then it is sufficient to have spawn/await on
   //  bindings combined with liberal inlining of the other parts of the
@@ -95,11 +99,12 @@ object AutomaticParallelism extends IRPass {
 
   def processModuleDefinition(
     binding: Definition,
-    @unused inlineContext: InlineContext
+    inlineContext: InlineContext
   ): Definition = {
     binding match {
-      case method: Definition.Method.Explicit => method
-      case atom: Definition.Atom              => atom
+      case method: Definition.Method.Explicit =>
+        processMethod(method, inlineContext)
+      case atom: Definition.Atom => atom
       case _: Definition.Type =>
         throw new CompilerError(
           "Complex type definitions should not be present at the point of " +
@@ -128,6 +133,78 @@ object AutomaticParallelism extends IRPass {
       case err: Error => err
     }
   }
+
+  def processMethod(
+    method: Definition.Method.Explicit,
+    context: InlineContext
+  ): Definition.Method.Explicit = {
+    val body = method.body match {
+      case lam: IR.Function.Lambda => runExpression(lam, context)
+      case _ =>
+        throw new CompilerError("Explicit methods should only contain lambdas.")
+    }
+    method.copy(body = body)
+  }
+
+  def processExpression(
+    expr: IR.Expression,
+    context: InlineContext,
+    irMap: IrMap
+  ): IR.Expression = {
+    irMap += expr.getId -> expr
+    expr match {
+      case func: IR.Function   => processFunction(func, context, irMap)
+      case app: IR.Application => processApplication(app, context, irMap)
+      case name: IR.Name       => processName(name, context, irMap)
+      case cse: IR.Case        => processCase(cse, context, irMap)
+      case lit: IR.Literal     => processLiteral(lit, context, irMap)
+      case block: IR.Expression.Block => {
+        block // TODO [AA]
+      }
+      case binding: IR.Expression.Binding => {
+        binding // TODO [AA]
+      }
+      case comm: IR.Comment    => comm
+      case foreign: IR.Foreign => foreign
+      case empty: IR.Empty     => empty
+      case error: IR.Error     => error
+      case typ: Type           => typ
+    }
+  }
+
+  def processFunction(
+    function: IR.Function,
+    @unused context: InlineContext,
+    @unused map: IrMap
+  ): IR.Expression = function
+
+  def processApplication(
+    app: IR.Application,
+    @unused context: InlineContext,
+    @unused map: IrMap
+  ): IR.Expression = app
+
+  def processName(
+    name: IR.Name,
+    @unused context: InlineContext,
+    @unused map: IrMap
+  ): IR.Expression = name
+
+  def processCase(
+    cse: IR.Case,
+    @unused context: InlineContext,
+    @unused map: IrMap
+  ): IR.Expression = cse
+
+  def processLiteral(
+    lit: IR.Literal,
+    @unused context: InlineContext,
+    @unused map: IrMap
+  ): IR.Expression = lit
+
+  // === Internal Data ========================================================
+
+  type IrMap = mutable.Map[IR.Identifier, IR]
 
   // === Pass Configuration ===================================================
 
