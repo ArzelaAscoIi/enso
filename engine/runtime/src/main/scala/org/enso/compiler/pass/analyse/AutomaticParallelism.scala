@@ -3,7 +3,7 @@ package org.enso.compiler.pass.analyse
 import org.enso.compiler.context.{InlineContext, ModuleContext}
 import org.enso.compiler.core.IR
 import org.enso.compiler.core.IR.Module.Scope.Definition
-import org.enso.compiler.core.IR.{Error, Name, Type}
+import org.enso.compiler.core.IR.{DefinitionArgument, Error, Name, Type}
 import org.enso.compiler.exception.CompilerError
 import org.enso.compiler.pass.IRPass
 import org.enso.compiler.pass.desugar.ComplexType
@@ -75,8 +75,7 @@ object AutomaticParallelism extends IRPass {
     ir: IR.Expression,
     inlineContext: InlineContext
   ): IR.Expression = {
-    val expressionMap: IrMap = mutable.Map()
-    processExpression(ir, inlineContext, expressionMap)
+    processExpression(ir, inlineContext, new PassData)
   }
 
   // If I can do the limited form, then it is sufficient to have spawn/await on
@@ -149,15 +148,15 @@ object AutomaticParallelism extends IRPass {
   def processExpression(
     expr: IR.Expression,
     context: InlineContext,
-    irMap: IrMap
+    passData: PassData
   ): IR.Expression = {
-    irMap += expr.getId -> expr
+    passData.putIr(expr)
     expr match {
-      case func: IR.Function   => processFunction(func, context, irMap)
-      case app: IR.Application => processApplication(app, context, irMap)
-      case name: IR.Name       => processName(name, context, irMap)
-      case cse: IR.Case        => processCase(cse, context, irMap)
-      case lit: IR.Literal     => processLiteral(lit, context, irMap)
+      case func: IR.Function   => processFunction(func, context, passData)
+      case app: IR.Application => processApplication(app, context, passData)
+      case name: IR.Name       => processName(name, context, passData)
+      case cse: IR.Case        => processCase(cse, context, passData)
+      case lit: IR.Literal     => processLiteral(lit, context, passData)
       case block: IR.Expression.Block => {
         block // TODO [AA]
       }
@@ -174,37 +173,84 @@ object AutomaticParallelism extends IRPass {
 
   def processFunction(
     function: IR.Function,
-    @unused context: InlineContext,
-    @unused map: IrMap
-  ): IR.Expression = function
+    context: InlineContext,
+    passData: PassData
+  ): IR.Expression = function match {
+    case fn @ IR.Function.Lambda(arguments, body, _, _, _, _) => {
+      val processedArguments = arguments.map {
+        case arg @ DefinitionArgument.Specified(_, _, _, _, _, _) => arg
+      }
+      processedArguments.foreach(passData.putIr)
+      val processedBody = processExpression(body, context, passData)
+      fn.copy(arguments = processedArguments, body = processedBody)
+    }
+    case _: IR.Function.Binding =>
+      throw new CompilerError(
+        "Binding-style functions should be desugared by the point of " +
+        "parallelism analysis."
+      )
+  }
 
   def processApplication(
     app: IR.Application,
     @unused context: InlineContext,
-    @unused map: IrMap
+    @unused passData: PassData
   ): IR.Expression = app
 
   def processName(
     name: IR.Name,
     @unused context: InlineContext,
-    @unused map: IrMap
+    @unused passData: PassData
   ): IR.Expression = name
 
   def processCase(
     cse: IR.Case,
     @unused context: InlineContext,
-    @unused map: IrMap
+    @unused passData: PassData
   ): IR.Expression = cse
 
   def processLiteral(
     lit: IR.Literal,
     @unused context: InlineContext,
-    @unused map: IrMap
+    @unused passData: PassData
   ): IR.Expression = lit
 
   // === Internal Data ========================================================
 
-  type IrMap = mutable.Map[IR.Identifier, IR]
+  /** Data used to perform the analysis in this pass.
+    */
+  class PassData {
+    private[this] val mapping: mutable.Map[IR.Identifier, IR] =
+      mutable.Map()
+
+    /** Store the IR in the pass data.
+      *
+      * @param ir the IR to store
+      */
+    def putIr(ir: IR): Unit = {
+      mapping += ir.getId -> ir
+    }
+
+    /** Get the IR by the specified `id`, if it exists.
+      *
+      * @param id the identifier to get the IR for
+      * @return the IR associated with `id`, if it exists
+      */
+    def getIr(id: IR.Identifier): Option[IR] = {
+      mapping.get(id)
+    }
+
+    /** Unsafely gets the IR associated with `id`.
+      *
+      * This function will cause a crash if no IR exists for the provided `id`.
+      *
+      * @param id the identifier to get the IR for
+      * @return the IR associated with `id`
+      */
+    def unsafeGetIr(id: IR.Identifier): IR = {
+      this.getIr(id).get
+    }
+  }
 
   // === Pass Configuration ===================================================
 
