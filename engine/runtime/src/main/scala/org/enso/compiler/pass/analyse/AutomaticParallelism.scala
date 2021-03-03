@@ -3,10 +3,17 @@ package org.enso.compiler.pass.analyse
 import org.enso.compiler.context.{InlineContext, ModuleContext}
 import org.enso.compiler.core.IR
 import org.enso.compiler.core.IR.Module.Scope.Definition
-import org.enso.compiler.core.IR.{DefinitionArgument, Error, Name, Type}
+import org.enso.compiler.core.IR.{
+  Application,
+  DefinitionArgument,
+  Error,
+  Name,
+  Type
+}
 import org.enso.compiler.exception.CompilerError
 import org.enso.compiler.pass.IRPass
 import org.enso.compiler.pass.desugar.ComplexType
+import org.enso.compiler.pass.resolve.ExpressionAnnotations
 
 import scala.annotation.unused
 import scala.collection.mutable
@@ -150,8 +157,7 @@ object AutomaticParallelism extends IRPass {
     context: InlineContext,
     passData: PassData
   ): IR.Expression = {
-    passData.putIr(expr)
-    expr match {
+    val result = expr match {
       case func: IR.Function   => processFunction(func, context, passData)
       case app: IR.Application => processApplication(app, context, passData)
       case name: IR.Name       => processName(name, context, passData)
@@ -169,6 +175,8 @@ object AutomaticParallelism extends IRPass {
       case error: IR.Error     => error
       case typ: Type           => typ
     }
+    passData.putIr(result)
+    result
   }
 
   def processFunction(
@@ -178,9 +186,11 @@ object AutomaticParallelism extends IRPass {
   ): IR.Expression = function match {
     case fn @ IR.Function.Lambda(arguments, body, _, _, _, _) => {
       val processedArguments = arguments.map {
-        case arg @ DefinitionArgument.Specified(_, _, _, _, _, _) => arg
+        case arg @ DefinitionArgument.Specified(_, default, _, _, _, _) =>
+          val newDefault = default.map(processExpression(_, context, passData))
+          arg.copy(defaultValue = newDefault)
       }
-      processedArguments.foreach(passData.putIr)
+      processedArguments.foreach(passData.putDefinitionArg)
       val processedBody = processExpression(body, context, passData)
       fn.copy(arguments = processedArguments, body = processedBody)
     }
@@ -195,7 +205,54 @@ object AutomaticParallelism extends IRPass {
     app: IR.Application,
     @unused context: InlineContext,
     @unused passData: PassData
-  ): IR.Expression = app
+  ): IR.Expression = {
+    val result: IR.Expression = app match {
+      case app @ Application.Prefix(function, arguments, _, _, _, _) =>
+        val isParAnnotated = app
+          .getMetadata(ExpressionAnnotations)
+          .exists(m =>
+            m.annotations.exists(ann =>
+              ann.name == ExpressionAnnotations.autoParallelName
+            )
+          )
+        if (isParAnnotated) {
+          println("Rewriting")
+          app
+        } else {
+          val newFn = processExpression(function, context, passData)
+          val newArgs = arguments.map {
+            case spec @ IR.CallArgument.Specified(_, value, _, _, _, _) =>
+              val result =
+                spec.copy(value = processExpression(value, context, passData))
+              passData.putCallArgument(result)
+              result
+          }
+          app.copy(function = newFn, arguments = newArgs)
+        }
+      case force @ Application.Force(target, _, _, _) =>
+        val result =
+          force.copy(target = processExpression(target, context, passData))
+        passData.putIr(result)
+        result
+      case sequence: Application.Literal.Sequence =>
+        val newItems =
+          sequence.items.map(processExpression(_, context, passData))
+        val seq = sequence.copy(items = newItems)
+        passData.putIr(seq)
+        seq
+      case _: Application.Literal.Typeset =>
+        throw new CompilerError(
+          "Typeset literals not supported in parallelism analysis."
+        )
+      case _: Application.Operator =>
+        throw new CompilerError(
+          "Operators should be desugared to functions by the point of " +
+          "parallelism analysis."
+        )
+    }
+    passData.putIr(result)
+    result
+  }
 
   def processName(
     name: IR.Name,
@@ -219,9 +276,51 @@ object AutomaticParallelism extends IRPass {
 
   /** Data used to perform the analysis in this pass.
     */
+  // TODO [AA] Make private
   class PassData {
+    private[this] val callArgs: mutable.Map[IR.Identifier, IR.CallArgument] =
+      mutable.Map()
+    private[this] val definitionArgs
+      : mutable.Map[IR.Identifier, IR.DefinitionArgument] =
+      mutable.Map()
     private[this] val mapping: mutable.Map[IR.Identifier, IR] =
       mutable.Map()
+
+    /** Stores a call argument in the pass data.
+      *
+      * @param arg the argument to store
+      */
+    def putCallArgument(arg: IR.CallArgument): Unit = {
+      callArgs += arg.getId -> arg
+      mapping += arg.getId  -> arg
+    }
+
+    /** Gets a call argument from the pass data.
+      *
+      * @param id the identifier to get an argument for
+      * @return the argument associated with `id`, if it exists
+      */
+    def getCallArg(id: IR.Identifier): Option[IR.CallArgument] = {
+      callArgs.get(id)
+    }
+
+    /** Stores a definition argument in the pass data.
+      *
+      * @param arg the argument to store
+      */
+    def putDefinitionArg(arg: IR.DefinitionArgument): Unit = {
+      definitionArgs += arg.getId -> arg
+      mapping += arg.getId        -> arg
+    }
+
+    /** Gets a definition argument from the pass data.
+      *
+      * @param id the identifier to get an argument for
+      * @return the argument associated with `id`, if it exists
+      */
+    def getDefinitionArg(id: IR.Identifier): Option[IR.DefinitionArgument] = {
+      definitionArgs.get(id)
+    }
 
     /** Store the IR in the pass data.
       *

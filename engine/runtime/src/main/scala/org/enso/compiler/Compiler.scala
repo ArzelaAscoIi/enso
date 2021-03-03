@@ -477,7 +477,7 @@ class Compiler(
     source: Source,
     scope: ModuleScope
   ): Unit = {
-    new IrToTruffle(context, source, scope).run(ir)
+    new IrToTruffle(context, source, scope, config).run(ir)
   }
 
   /** Generates code for the truffle interpreter in an inline context.
@@ -496,7 +496,8 @@ class Compiler(
     new IrToTruffle(
       context,
       source,
-      inlineContext.module.getScope
+      inlineContext.module.getScope,
+      config
     ).runInline(
       ir,
       inlineContext.localScope.getOrElse(LocalScope.root),
