@@ -47,8 +47,8 @@ class AutomaticParallelismTest extends CompilerTest {
         |fn f g =
         |    x = File.read "foo"
         |    y = File.read "bar"
-        |    a = f x
-        |    b = g y
+        |    a = x.length
+        |    b = y.length
         |
         |    @Auto_Parallel a.n b
         |""".stripMargin.preprocessModule.analyse
@@ -71,15 +71,19 @@ class AutomaticParallelismTest extends CompilerTest {
   }
 
   "Failed parallelism analysis" should {
-    "raise an error when an intermediary is used outside the streams" in {
+    "raise a warning when an intermediary is used outside the streams" in {
       pending
     }
 
-    "raise an error when dependencies cannot be inlined" in {
+    "raise a warning when dependencies cannot be inlined" in {
       pending
     }
 
-    "raise an error when dependencies are used outside the @Auto_Parallel call" in {
+    "raise a warning when dependencies are used outside the @Auto_Parallel call" in {
+      pending
+    }
+
+    "raise a warning when the parallel call depends on input arguments" in {
       pending
     }
   }
