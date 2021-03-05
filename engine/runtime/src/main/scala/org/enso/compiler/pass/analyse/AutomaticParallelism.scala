@@ -203,7 +203,7 @@ object AutomaticParallelism extends IRPass {
 
     val firstArg = args.head
     val dep = mkStaticDep(firstArg)
-    val flow = dataflow.get(dep)
+    val flow = dataflow.dependents.get(dep)
 
     // TODO [AA] Add a way to get dependencies
 
