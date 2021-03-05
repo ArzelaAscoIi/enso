@@ -595,7 +595,7 @@ case object DataflowAnalysis extends IRPass {
     @throws[NoSuchElementException]
     def apply(key: DependencyInfo.Type): Set[DependencyInfo.Type] = {
       if (dependencies.contains(key)) {
-        getDependents(key) match {
+        get(key) match {
           case Some(deps) => deps
           case None       => throw new NoSuchElementException
         }
@@ -612,7 +612,7 @@ case object DataflowAnalysis extends IRPass {
       * @param key the key to get the dependents of
       * @return the set of the _direct_ dependencies on `key`, if it exists
       */
-    def getDirectDependents(
+    def getDirect(
       key: DependencyInfo.Type
     ): Option[Set[DependencyInfo.Type]] = {
       dependencies.get(key)
@@ -625,25 +625,10 @@ case object DataflowAnalysis extends IRPass {
       * @return the set of external identifiers for the direct dependencies of
       *         `key`, if they exist
       */
-    def getDirectDependentsExternal(
+    def getExternalDirect(
       key: DependencyInfo.Type
     ): Option[Set[IR.ExternalId]] = {
-      getDirectDependents(key).map(_.flatMap(_.externalId))
-    }
-
-    /** Gets the dependencies of the provided key (the things that it depends
-      * on)
-      *
-      * Please note taht the result set contains not just the _direct_
-      * dependencies of the key, but _all_ dependencies of the key.
-      *
-      * @param key the key to get the dependents of
-      * @return the set of all dependencies on `key`, if it exists
-      */
-    def getDependencies(
-      key: DependencyInfo.Type
-    ): Option[Set[DependencyInfo.Type]] = {
-      ???
+      getDirect(key).map(_.flatMap(_.externalId))
     }
 
     /** Safely gets the set of all dependents for the provided key.
@@ -654,9 +639,7 @@ case object DataflowAnalysis extends IRPass {
       * @param key the key to get the dependents of
       * @return the set of all dependencies on `key`, if key exists
       */
-    def getDependents(
-      key: DependencyInfo.Type
-    ): Option[Set[DependencyInfo.Type]] = {
+    def get(key: DependencyInfo.Type): Option[Set[DependencyInfo.Type]] = {
       val visited = mutable.Set[DependencyInfo.Type]()
 
       def go(key: DependencyInfo.Type): Set[DependencyInfo.Type] = {
@@ -690,10 +673,8 @@ case object DataflowAnalysis extends IRPass {
       * @return the set of all external identifiers of dependents on `key`, if
       *         it exists
       */
-    def getDependentsExternal(
-      key: DependencyInfo.Type
-    ): Option[Set[IR.ExternalId]] = {
-      getDependents(key).map(_.flatMap(_.externalId))
+    def getExternal(key: DependencyInfo.Type): Option[Set[IR.ExternalId]] = {
+      get(key).map(_.flatMap(_.externalId))
     }
 
     /** Executes an update on the dependency information.
