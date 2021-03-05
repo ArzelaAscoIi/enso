@@ -68,6 +68,14 @@ class AutomaticParallelismTest extends CompilerTest {
     "associate correct metadata with the block" in {
       pending
     }
+
+    "work in nested blocks" in {
+      pending
+    }
+
+    "leave unrelated things untouched" in {
+      pending
+    }
   }
 
   "Failed parallelism analysis" should {

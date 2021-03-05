@@ -16,6 +16,7 @@ import org.enso.compiler.pass.IRPass
 import org.enso.compiler.pass.desugar.ComplexType
 import org.enso.compiler.pass.resolve.ExpressionAnnotations
 
+import scala.annotation.unused
 import scala.collection.mutable
 
 /** This pass is responsible for discovering occurrences of automatically
@@ -82,7 +83,7 @@ object AutomaticParallelism extends IRPass {
     ir: IR.Expression,
     inlineContext: InlineContext
   ): IR.Expression = {
-    processExpression(ir, inlineContext, new PassData)
+    processExpression(ir, new MutablePassData(inlineContext), ScopedPassData())
   }
 
   // If I can do the limited form, then it is sufficient to have spawn/await on
@@ -92,14 +93,6 @@ object AutomaticParallelism extends IRPass {
   //  - At the read emit a special ReadVariableNode that joins on that thread.
   //  This becomes even easier if I can make assumptions about where the
   //  annotated expression is, but that isn't necessary for this approach.
-
-  // TODO [AA] The steps are as follows:
-  //   1. Walk over the IR, building a mapping from UUID to node along the way.
-  //   2. Get the dependency sets and ensure that they are disjoint.
-  //   3. Perform inlining.
-  //   4. Annotate the block with the parallel streams (structure TBC)
-  //   5. Emit a warning when the annotation cannot be obeyed.
-  //   6. Docs and cleanup
 
   // === Pass Implementation ==================================================
 
@@ -152,26 +145,30 @@ object AutomaticParallelism extends IRPass {
     method.copy(body = body)
   }
 
-  // TODO [AA] Make sure everything is registered
   private def processExpression(
     expr: IR.Expression,
-    context: InlineContext,
-    passData: PassData
+    mutData: MutablePassData,
+    scopedData: ScopedPassData
   ): IR.Expression = {
     val result = expr match {
-      case func: IR.Function   => processFunction(func, context, passData)
-      case app: IR.Application => processApplication(app, context, passData)
-      case cse: IR.Case        => processCase(cse, context, passData)
-      case block: IR.Expression.Block => {
-        val newExpressions =
-          block.expressions.map(processExpression(_, context, passData))
-        val newRet = processExpression(block.returnValue, context, passData)
-        block.copy(expressions = newExpressions, returnValue = newRet)
-      }
-      case binding: IR.Expression.Binding => {
-        val newExpr = processExpression(binding.expression, context, passData)
+      case func: IR.Function   => processFunction(func, mutData, scopedData)
+      case app: IR.Application => processApplication(app, mutData, scopedData)
+      case cse: IR.Case        => processCase(cse, mutData, scopedData)
+      case block: IR.Expression.Block =>
+        try {
+          val newScopedData = scopedData.addEnclosingBlock(block)
+          val newExpressions =
+            block.expressions.map(processExpression(_, mutData, newScopedData))
+          val newRet =
+            processExpression(block.returnValue, mutData, newScopedData)
+          block.copy(expressions = newExpressions, returnValue = newRet)
+        } catch {
+          case _: RewriteException => ???
+        }
+      case binding: IR.Expression.Binding =>
+        val newExpr =
+          processExpression(binding.expression, mutData, scopedData)
         binding.copy(expression = newExpr)
-      }
       case name: IR.Name       => name
       case lit: IR.Literal     => lit
       case comm: IR.Comment    => comm
@@ -180,37 +177,50 @@ object AutomaticParallelism extends IRPass {
       case error: IR.Error     => error
       case typ: Type           => typ
     }
-    passData.putExpr(result)
+    mutData.putExpr(result)
     result
   }
 
-  private def processFunction(
-    function: IR.Function,
-    context: InlineContext,
-    passData: PassData
-  ): IR.Expression = function match {
-    case fn @ IR.Function.Lambda(arguments, body, _, _, _, _) => {
-      val processedArguments = arguments.map {
-        case arg @ DefinitionArgument.Specified(_, default, _, _, _, _) =>
-          val newDefault = default.map(processExpression(_, context, passData))
-          val result     = arg.copy(defaultValue = newDefault)
-          passData.putDefinitionArg(result)
-          result
-      }
-      val processedBody = processExpression(body, context, passData)
-      fn.copy(arguments = processedArguments, body = processedBody)
-    }
-    case _: IR.Function.Binding =>
-      throw new CompilerError(
-        "Binding-style functions should be desugared by the point of " +
-        "parallelism analysis."
+  // TODO [AA] The steps are as follows:
+  //   1. Walk over the IR, building a mapping from UUID to node along the way.
+  //   2. Get the dependency sets and ensure that they are disjoint, and not
+  //      touched by others, and do not depend on function args
+  //   3. Perform inlining.
+  //   4. Annotate the block with the parallel streams (structure TBC)
+  //   5. Emit a warning when the annotation cannot be obeyed.
+  //   6. Docs and cleanup
+  //  How do I get the inlined blocks to the right place?
+
+  private def processParallelCall(
+    app: Application.Prefix,
+    @unused mutData: MutablePassData,
+    @unused scopedData: ScopedPassData
+  ): IR.Expression = {
+    println("Rewriting")
+    // TODO [AA] Check that the function does not depend on args
+    val dataflow = app
+      .getMetadata(DataflowAnalysis)
+      .getOrElse(
+        throw new CompilerError(
+          "Dataflow analysis metadata is required for parallelism analysis."
+        )
       )
+    val args = app.arguments.collect { case a: IR.CallArgument.Specified => a }
+
+
+
+
+
+    args.foreach(a => println(a.showCode()))
+    println(dataflow.dependencies.size)
+    println("DONE")
+    app
   }
 
   private def processApplication(
     app: IR.Application,
-    context: InlineContext,
-    passData: PassData
+    mutData: MutablePassData,
+    scopedData: ScopedPassData
   ): IR.Expression = {
     val result: IR.Expression = app match {
       case app @ Application.Prefix(function, arguments, _, _, _, _) =>
@@ -222,24 +232,23 @@ object AutomaticParallelism extends IRPass {
             )
           )
         if (isParAnnotated) {
-          println("Rewriting")
-          app
+          processParallelCall(app, mutData, scopedData)
         } else {
-          val newFn = processExpression(function, context, passData)
+          val newFn = processExpression(function, mutData, scopedData)
           val newArgs = arguments.map {
             case spec @ IR.CallArgument.Specified(_, value, _, _, _, _) =>
-              val newExpr = processExpression(value, context, passData)
+              val newExpr = processExpression(value, mutData, scopedData)
               val result  = spec.copy(value = newExpr)
-              passData.putCallArgument(result)
+              mutData.putCallArgument(result)
               result
           }
           app.copy(function = newFn, arguments = newArgs)
         }
       case force @ Application.Force(target, _, _, _) =>
-        force.copy(target = processExpression(target, context, passData))
+        force.copy(target = processExpression(target, mutData, scopedData))
       case sequence: Application.Literal.Sequence =>
         val newItems =
-          sequence.items.map(processExpression(_, context, passData))
+          sequence.items.map(processExpression(_, mutData, scopedData))
         sequence.copy(items = newItems)
       case _: Application.Literal.Typeset =>
         throw new CompilerError(
@@ -251,18 +260,42 @@ object AutomaticParallelism extends IRPass {
           "parallelism analysis."
         )
     }
-    passData.putExpr(result)
+    mutData.putExpr(result)
     result
+  }
+
+  private def processFunction(
+    function: IR.Function,
+    passData: MutablePassData,
+    scopedData: ScopedPassData
+  ): IR.Expression = function match {
+    case fn @ IR.Function.Lambda(arguments, body, _, _, _, _) => {
+      val processedArguments = arguments.map {
+        case arg @ DefinitionArgument.Specified(_, default, _, _, _, _) =>
+          val newDefault =
+            default.map(processExpression(_, passData, scopedData))
+          val result = arg.copy(defaultValue = newDefault)
+          passData.putDefinitionArg(result)
+          result
+      }
+      val processedBody = processExpression(body, passData, scopedData)
+      fn.copy(arguments = processedArguments, body = processedBody)
+    }
+    case _: IR.Function.Binding =>
+      throw new CompilerError(
+        "Binding-style functions should be desugared by the point of " +
+        "parallelism analysis."
+      )
   }
 
   private def processCase(
     cse: IR.Case,
-    context: InlineContext,
-    passData: PassData
+    mutData: MutablePassData,
+    scopedData: ScopedPassData
   ): IR.Expression = cse match {
     case expr @ Case.Expr(scrutinee, branches, _, _, _) =>
-      val newScrut    = processExpression(scrutinee, context, passData)
-      val newBranches = branches.map(processCaseBranch(_, context, passData))
+      val newScrut    = processExpression(scrutinee, mutData, scopedData)
+      val newBranches = branches.map(processCaseBranch(_, mutData, scopedData))
       expr.copy(scrutinee = newScrut, branches = newBranches)
     case _: Case.Branch =>
       throw new CompilerError("Unexpected case branch in processCase")
@@ -270,22 +303,45 @@ object AutomaticParallelism extends IRPass {
 
   private def processCaseBranch(
     branch: IR.Case.Branch,
-    context: InlineContext,
-    passData: PassData
+    mutData: MutablePassData,
+    scopedData: ScopedPassData
   ): IR.Case.Branch = {
-    val result = branch.copy(expression =
-      processExpression(branch.expression, context, passData)
-    )
-    passData.putExpr(result)
+    val result =
+      branch.copy(expression =
+        processExpression(branch.expression, mutData, scopedData)
+      )
+    mutData.putExpr(result)
     result
   }
 
   // === Internal Data ========================================================
 
-  /** Data used to perform the analysis in this pass.
+  private case class RewriteException() extends Exception
+
+  /** Pass data that is immutable for the pass.
+    *
+    * @param enclosingBlocks the block that encloses the current expression
+    */
+  private case class ScopedPassData(
+    enclosingBlocks: Seq[IR.Expression.Block] = Seq()
+  ) {
+
+    /** Adds an enclosing block onto the stack.
+      *
+      * @param block the new enclosing block
+      * @return a new instance of the pass data
+      */
+    def addEnclosingBlock(block: IR.Expression.Block): ScopedPassData = {
+      this.copy(enclosingBlocks = enclosingBlocks :+ block)
+    }
+  }
+
+  /** Mutable used to perform the analysis in this pass.
+    *
+    * @param context the compiler context for the pass
     */
   // TODO [AA] Make private
-  class PassData {
+  class MutablePassData(val context: InlineContext) {
     private[this] val callArgs: mutable.Map[IR.Identifier, IR.CallArgument] =
       mutable.Map()
     private[this] val definitionArgs
