@@ -3,16 +3,10 @@ package org.enso.compiler.pass.analyse
 import org.enso.compiler.context.{InlineContext, ModuleContext}
 import org.enso.compiler.core.IR
 import org.enso.compiler.core.IR.Module.Scope.Definition
-import org.enso.compiler.core.IR.{
-  Application,
-  Case,
-  DefinitionArgument,
-  Error,
-  Name,
-  Type
-}
+import org.enso.compiler.core.IR.{Application, Case, DefinitionArgument, Error, Name, Type}
 import org.enso.compiler.exception.CompilerError
 import org.enso.compiler.pass.IRPass
+import org.enso.compiler.pass.analyse.DataflowAnalysis.DependencyInfo
 import org.enso.compiler.pass.desugar.ComplexType
 import org.enso.compiler.pass.resolve.ExpressionAnnotations
 
@@ -196,7 +190,7 @@ object AutomaticParallelism extends IRPass {
     @unused mutData: MutablePassData,
     @unused scopedData: ScopedPassData
   ): IR.Expression = {
-    println("Rewriting")
+    println("========== Rewriting ==========")
     // TODO [AA] Check that the function does not depend on args
     val dataflow = app
       .getMetadata(DataflowAnalysis)
@@ -207,14 +201,20 @@ object AutomaticParallelism extends IRPass {
       )
     val args = app.arguments.collect { case a: IR.CallArgument.Specified => a }
 
+    val firstArg = args.head
+    val dep = mkStaticDep(firstArg)
+    val flow = dataflow.getDependents(dep)
 
+    // TODO [AA] Add a way to get dependencies
 
-
-
-    args.foreach(a => println(a.showCode()))
-    println(dataflow.dependencies.size)
-    println("DONE")
+    println(flow)
+    println(app.getId)
+    println("========== Done ==========")
     app
+  }
+
+  private def mkStaticDep(ir: IR): DependencyInfo.Type.Static = {
+    DependencyInfo.Type.Static(ir.getId, ir.getExternalId)
   }
 
   private def processApplication(
