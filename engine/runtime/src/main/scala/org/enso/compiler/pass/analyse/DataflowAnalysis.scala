@@ -220,14 +220,6 @@ case object DataflowAnalysis extends IRPass {
         info.dependents.updateAt(bodyDep, Set(lamDep))
         info.dependencies.updateAt(lamDep, Set(bodyDep))
 
-        arguments.foreach(arg =>
-          arg.defaultValue.foreach(d => {
-            val defaultDep = asStatic(d)
-            info.dependents.updateAt(defaultDep, Set(lamDep))
-            info.dependencies.updateAt(lamDep, Set(defaultDep))
-          })
-        )
-
         lam
           .copy(
             arguments = arguments.map(analyseDefinitionArgument(_, info)),
@@ -246,7 +238,7 @@ case object DataflowAnalysis extends IRPass {
     * A prefix application depends on the values of the function and arguments,
     * while a force depends purely on the term being forced.
     *
-    * @param application the appliation to perform dependency analysis on
+    * @param application the application to perform dependency analysis on
     * @param info the dependency information for the module
     * @return `application`, with attached dependency information
     */

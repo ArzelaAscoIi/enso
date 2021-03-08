@@ -705,6 +705,186 @@ class DataflowAnalysisTest extends CompilerTest {
       )
     }
 
+    "correctly identify local indirect dependencies" in {
+      val dependencies = depInfo.dependencies
+
+      dependencies.get(methodId) shouldEqual Some(
+        Set(
+          fnId,
+          fnBodyId,
+          frobExprId,
+          frobArgAId,
+          frobArgAExprId,
+          frobArgCId,
+          frobArgCExprId,
+          frobFnId,
+          frobnicateSymbol,
+          cBindExprId,
+          cBindNameId,
+          plusExprId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgAId,
+          plusExprArgBId,
+          plusExprArgAExprId,
+          plusExprArgBExprId,
+          fnArgAId,
+          fnArgBId
+        )
+      )
+      dependencies.get(fnId) shouldEqual Some(
+        Set(
+          fnBodyId,
+          frobExprId,
+          frobArgAId,
+          frobArgAExprId,
+          frobArgCId,
+          frobArgCExprId,
+          frobFnId,
+          frobnicateSymbol,
+          cBindExprId,
+          cBindNameId,
+          plusExprId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgAId,
+          plusExprArgBId,
+          plusExprArgAExprId,
+          plusExprArgBExprId,
+          fnArgAId,
+          fnArgBId
+        )
+      )
+      dependencies.get(fnBodyId) shouldEqual Some(
+        Set(
+          frobExprId,
+          frobArgAId,
+          frobArgAExprId,
+          frobArgCId,
+          frobArgCExprId,
+          frobFnId,
+          frobnicateSymbol,
+          cBindExprId,
+          cBindNameId,
+          plusExprId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgAId,
+          plusExprArgBId,
+          plusExprArgAExprId,
+          plusExprArgBExprId,
+          fnArgAId,
+          fnArgBId
+        )
+      )
+      dependencies.get(fnArgAId) shouldEqual None
+      dependencies.get(fnArgBId) shouldEqual None
+
+      // The `IO.println` expression
+      dependencies.get(printlnExprId) shouldEqual Some(
+        Set(
+          printlnFnId,
+          printlnSymbol,
+          printlnArgIOId,
+          printlnArgIOExprId,
+          ioSymbol,
+          printlnArgBId,
+          printlnArgBExprId,
+          fnArgBId
+        )
+      )
+      dependencies.get(printlnFnId) shouldEqual Some(Set(printlnSymbol))
+      dependencies.get(printlnArgIOId) shouldEqual Some(
+        Set(printlnArgIOExprId, ioSymbol)
+      )
+      dependencies.get(printlnArgIOExprId) shouldEqual Some(Set(ioSymbol))
+      dependencies.get(printlnArgBId) shouldEqual Some(
+        Set(printlnArgBExprId, fnArgBId)
+      )
+      dependencies.get(printlnArgBExprId) shouldEqual Some(Set(fnArgBId))
+
+      // The `c = ...` expression
+      dependencies.get(cBindExprId) shouldEqual Some(
+        Set(
+          cBindNameId,
+          plusExprId,
+          plusExprArgAId,
+          plusExprArgAExprId,
+          fnArgAId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgBId,
+          plusExprArgBExprId,
+          fnArgBId
+        )
+      )
+      dependencies.get(cBindNameId) shouldEqual None
+      dependencies.get(plusExprId) shouldEqual Some(
+        Set(
+          plusExprArgAId,
+          plusExprArgAExprId,
+          fnArgAId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgBId,
+          plusExprArgBExprId,
+          fnArgBId
+        )
+      )
+      dependencies.get(plusExprArgAId) shouldEqual Some(
+        Set(
+          plusExprArgAExprId,
+          fnArgAId
+        )
+      )
+      dependencies.get(plusExprFnId) shouldEqual Some(Set(plusSymbol))
+      dependencies.get(plusExprArgBId) shouldEqual Some(
+        Set(plusExprArgBExprId, fnArgBId)
+      )
+
+      // The `frobnicate` expression
+      dependencies.get(frobExprId) shouldEqual Some(
+        Set(
+          frobArgAId,
+          frobArgAExprId,
+          frobArgCId,
+          frobArgCExprId,
+          frobFnId,
+          frobnicateSymbol,
+          cBindExprId,
+          cBindNameId,
+          plusExprId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgAId,
+          plusExprArgBId,
+          plusExprArgAExprId,
+          plusExprArgBExprId,
+          fnArgAId,
+          fnArgBId
+        )
+      )
+      dependencies.get(frobArgAId) shouldEqual Some(
+        Set(frobArgAExprId, fnArgAId)
+      )
+      dependencies.get(frobArgCId) shouldEqual Some(
+        Set(
+          frobArgCExprId,
+          cBindExprId,
+          cBindNameId,
+          plusExprId,
+          plusExprFnId,
+          plusSymbol,
+          plusExprArgAId,
+          plusExprArgAExprId,
+          fnArgAId,
+          plusExprArgBId,
+          plusExprArgBExprId,
+          fnArgBId
+        )
+      )
+    }
+
     "associate the dependency info with every node in the IR" in {
       ir.hasDependencyInfo
       method.hasDependencyInfo
@@ -780,27 +960,34 @@ class DataflowAnalysisTest extends CompilerTest {
       // Dynamic Symbols
       val plusSym = mkDynamicDep("+")
 
-      // The Tests
-      depInfo.dependents.getDirect(fnId) should not be defined
-      depInfo.dependents.getDirect(fnArgXId) shouldEqual Some(
+      // Info
+      val dependents = depInfo.dependents
+      val dependencies = depInfo.dependencies
+
+      // The Tests for dependents
+      dependents.getDirect(fnId) should not be defined
+      dependents.getDirect(fnArgXId) shouldEqual Some(
         Set(plusArgXExprId, fnArgYDefaultId)
       )
-      depInfo.dependents.getDirect(fnArgYId) shouldEqual Some(
-        Set(plusArgYExprId)
-      )
-      depInfo.dependents.getDirect(fnArgYDefaultId) shouldEqual Some(
-        Set(fnArgYId, fnId)
-      )
-      depInfo.dependents.getDirect(fnBodyId) shouldEqual Some(Set(fnId))
-      depInfo.dependents.getDirect(plusSym) shouldEqual Some(Set(plusFnId))
-      depInfo.dependents.getDirect(plusArgXId) shouldEqual Some(Set(fnBodyId))
-      depInfo.dependents.getDirect(plusArgXExprId) shouldEqual Some(
-        Set(plusArgXId)
-      )
-      depInfo.dependents.getDirect(plusArgYId) shouldEqual Some(Set(fnBodyId))
-      depInfo.dependents.getDirect(plusArgYExprId) shouldEqual Some(
-        Set(plusArgYId)
-      )
+      dependents.getDirect(fnArgYId) shouldEqual Some(Set(plusArgYExprId))
+      dependents.getDirect(fnArgYDefaultId) shouldEqual Some(Set(fnArgYId))
+      dependents.getDirect(fnBodyId) shouldEqual Some(Set(fnId))
+      dependents.getDirect(plusSym) shouldEqual Some(Set(plusFnId))
+      dependents.getDirect(plusArgXId) shouldEqual Some(Set(fnBodyId))
+      dependents.getDirect(plusArgXExprId) shouldEqual Some(Set(plusArgXId))
+      dependents.getDirect(plusArgYId) shouldEqual Some(Set(fnBodyId))
+      dependents.getDirect(plusArgYExprId) shouldEqual Some(Set(plusArgYId))
+
+      // The Tests for dependencies
+      dependencies.getDirect(fnId) shouldEqual Some(Set(fnBodyId))
+      dependencies.getDirect(fnArgXId) shouldEqual None
+      dependencies.getDirect(fnArgYId) shouldEqual Some(Set(fnArgYDefaultId))
+      dependencies.getDirect(fnArgYDefaultId) shouldEqual Some(Set(fnArgXId))
+      dependencies.getDirect(fnBodyId) shouldEqual Some(Set(plusFnId, plusArgXId, plusArgYId))
+      dependencies.getDirect(plusArgXId) shouldEqual Some(Set(plusArgXExprId))
+      dependencies.getDirect(plusArgYId) shouldEqual Some(Set(plusArgYExprId))
+      dependencies.getDirect(plusArgXExprId) shouldEqual Some(Set(fnArgXId))
+      dependencies.getDirect(plusArgYExprId) shouldEqual Some(Set(fnArgYId))
     }
 
     "work properly for prefix applications" in {
@@ -851,33 +1038,27 @@ class DataflowAnalysisTest extends CompilerTest {
       // Global Symbols
       val mulSym = mkDynamicDep("*")
 
-      // The test
-      depInfo.dependents.getDirect(appId) should not be defined
-      depInfo.dependents.getDirect(appFnId) shouldEqual Some(Set(appId))
-      depInfo.dependents.getDirect(appArg10Id) shouldEqual Some(Set(appId))
-      depInfo.dependents.getDirect(appArg10ExprId) shouldEqual Some(
-        Set(appArg10Id)
-      )
-      depInfo.dependents.getDirect(appArg10NameId) shouldEqual Some(
-        Set(appArg10Id)
-      )
-      depInfo.dependents.getDirect(appArgFnId) shouldEqual Some(Set(appId))
-      depInfo.dependents.getDirect(lamId) shouldEqual Some(Set(appArgFnId))
-      depInfo.dependents.getDirect(lamArgXId) shouldEqual Some(
-        Set(mulArg1ExprId, mulArg2ExprId)
-      )
-      depInfo.dependents.getDirect(mulId) shouldEqual Some(Set(lamId))
-      depInfo.dependents.getDirect(mulFnId) shouldEqual Some(Set(mulId))
-      depInfo.dependents.getDirect(mulArg1Id) shouldEqual Some(Set(mulId))
-      depInfo.dependents.getDirect(mulArg1ExprId) shouldEqual Some(
-        Set(mulArg1Id)
-      )
-      depInfo.dependents.getDirect(mulArg2Id) shouldEqual Some(Set(mulId))
-      depInfo.dependents.getDirect(mulArg2ExprId) shouldEqual Some(
-        Set(mulArg2Id)
-      )
+      // The Info
+      val dependents = depInfo.dependents
 
-      depInfo.dependents.getDirect(mulSym) shouldEqual Some(Set(mulFnId))
+      // The tests for dependents
+      dependents.getDirect(appId) should not be defined
+      dependents.getDirect(appFnId) shouldEqual Some(Set(appId))
+      dependents.getDirect(appArg10Id) shouldEqual Some(Set(appId))
+      dependents.getDirect(appArg10ExprId) shouldEqual Some(Set(appArg10Id))
+      dependents.getDirect(appArg10NameId) shouldEqual Some(Set(appArg10Id))
+      dependents.getDirect(appArgFnId) shouldEqual Some(Set(appId))
+      dependents.getDirect(lamId) shouldEqual Some(Set(appArgFnId))
+      dependents.getDirect(lamArgXId) shouldEqual Some(Set(mulArg1ExprId, mulArg2ExprId))
+      dependents.getDirect(mulId) shouldEqual Some(Set(lamId))
+      dependents.getDirect(mulFnId) shouldEqual Some(Set(mulId))
+      dependents.getDirect(mulArg1Id) shouldEqual Some(Set(mulId))
+      dependents.getDirect(mulArg1ExprId) shouldEqual Some(Set(mulArg1Id))
+      dependents.getDirect(mulArg2Id) shouldEqual Some(Set(mulId))
+      dependents.getDirect(mulArg2ExprId) shouldEqual Some(Set(mulArg2Id))
+      dependents.getDirect(mulSym) shouldEqual Some(Set(mulFnId))
+
+      // The tests for dependencies
     }
 
     "work properly for forces" in {
