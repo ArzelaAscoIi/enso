@@ -6,7 +6,10 @@ import org.enso.compiler.core.IR
 import org.enso.compiler.core.IR.Pattern
 import org.enso.compiler.data.CompilerConfig
 import org.enso.compiler.pass.PassConfiguration._
-import org.enso.compiler.pass.analyse.DataflowAnalysis.DependencyInfo
+import org.enso.compiler.pass.analyse.DataflowAnalysis.{
+  DependencyInfo,
+  DependencyMapping
+}
 import org.enso.compiler.pass.analyse.DataflowAnalysis.DependencyInfo.Type.asStatic
 import org.enso.compiler.pass.analyse.{AliasAnalysis, DataflowAnalysis}
 import org.enso.compiler.pass.optimise.ApplicationSaturation
@@ -163,14 +166,14 @@ class DataflowAnalysisTest extends CompilerTest {
 
   "Dataflow metadata" should {
     "allow querying for expressions that should be invalidated on change" in {
-      val dependencies = new DependencyInfo
+      val dependencies = new DependencyMapping
       val ids          = List.fill(5)(genStaticDep)
 
-      dependencies.dependents(ids.head) = Set(ids(1), ids(2))
-      dependencies.dependents(ids(2))   = Set(ids(3), ids(4))
-      dependencies.dependents(ids(4))   = Set(ids(1), ids.head)
+      dependencies(ids.head) = Set(ids(1), ids(2))
+      dependencies(ids(2))   = Set(ids(3), ids(4))
+      dependencies(ids(4))   = Set(ids(1), ids.head)
 
-      dependencies.dependents(ids.head) shouldEqual Set(
+      dependencies(ids.head) shouldEqual Set(
         ids(1),
         ids(2),
         ids(3),
@@ -180,18 +183,18 @@ class DataflowAnalysisTest extends CompilerTest {
     }
 
     "provide a safe query function as well" in {
-      val dependencies = new DependencyInfo
+      val dependencies = new DependencyMapping
       val ids          = List.fill(5)(genStaticDep)
       val badId        = genStaticDep
 
-      dependencies.dependents(ids.head) = Set(ids(1), ids(2))
-      dependencies.dependents(ids(2))   = Set(ids(3), ids(4))
-      dependencies.dependents(ids(4))   = Set(ids(1), ids.head)
+      dependencies(ids.head) = Set(ids(1), ids(2))
+      dependencies(ids(2))   = Set(ids(3), ids(4))
+      dependencies(ids(4))   = Set(ids(1), ids.head)
 
-      dependencies.dependents.get(ids.head) shouldBe defined
-      dependencies.dependents.get(badId) should not be defined
+      dependencies.get(ids.head) shouldBe defined
+      dependencies.get(badId) should not be defined
 
-      dependencies.dependents.get(ids.head) shouldEqual Some(
+      dependencies.get(ids.head) shouldEqual Some(
         Set(
           ids(1),
           ids(2),
@@ -203,54 +206,48 @@ class DataflowAnalysisTest extends CompilerTest {
     }
 
     "allow querying only the direct dependents of a node" in {
-      val dependencies = new DependencyInfo
+      val dependencies = new DependencyMapping
       val ids          = List.fill(5)(genStaticDep)
 
-      dependencies.dependents(ids.head) = Set(ids(1), ids(2))
-      dependencies.dependents(ids(2))   = Set(ids(3), ids(4))
-      dependencies.dependents(ids(4))   = Set(ids(1), ids.head)
+      dependencies(ids.head) = Set(ids(1), ids(2))
+      dependencies(ids(2))   = Set(ids(3), ids(4))
+      dependencies(ids(4))   = Set(ids(1), ids.head)
 
-      dependencies.dependents.getDirect(ids.head) shouldEqual Some(
-        Set(ids(1), ids(2))
-      )
-      dependencies.dependents.getDirect(ids(2)) shouldEqual Some(
-        Set(ids(3), ids(4))
-      )
-      dependencies.dependents.getDirect(ids(4)) shouldEqual Some(
-        Set(ids(1), ids.head)
-      )
+      dependencies.getDirect(ids.head) shouldEqual Some(Set(ids(1), ids(2)))
+      dependencies.getDirect(ids(2)) shouldEqual Some(Set(ids(3), ids(4)))
+      dependencies.getDirect(ids(4)) shouldEqual Some(Set(ids(1), ids.head))
     }
 
     "allow for updating the dependents of a node" in {
-      val dependencies = new DependencyInfo
+      val dependencies = new DependencyMapping
       val ids          = List.fill(3)(genStaticDep)
 
-      dependencies.dependents(ids.head) = Set(ids(1))
-      dependencies.dependents(ids.head) shouldEqual Set(ids(1))
+      dependencies(ids.head) = Set(ids(1))
+      dependencies(ids.head) shouldEqual Set(ids(1))
 
-      dependencies.dependents(ids.head) = Set(ids(2))
-      dependencies.dependents(ids.head) shouldEqual Set(ids(2))
+      dependencies(ids.head) = Set(ids(2))
+      dependencies(ids.head) shouldEqual Set(ids(2))
 
-      dependencies.dependents(ids.head) ++= Set(ids(1))
-      dependencies.dependents(ids.head) shouldEqual Set(ids(1), ids(2))
+      dependencies(ids.head) ++= Set(ids(1))
+      dependencies(ids.head) shouldEqual Set(ids(1), ids(2))
     }
 
     "allow for updating at a given node" in {
-      val dependencies = new DependencyInfo
+      val dependencies = new DependencyMapping
       val ids          = List.fill(6)(genStaticDep)
       val set1         = Set.from(ids.tail)
       val newId        = genStaticDep
 
-      dependencies.dependents.updateAt(ids.head, set1)
-      dependencies.dependents(ids.head) shouldEqual set1
+      dependencies.updateAt(ids.head, set1)
+      dependencies(ids.head) shouldEqual set1
 
-      dependencies.dependents.updateAt(ids.head, Set(newId))
-      dependencies.dependents(ids.head) shouldEqual (set1 + newId)
+      dependencies.updateAt(ids.head, Set(newId))
+      dependencies(ids.head) shouldEqual (set1 + newId)
     }
 
     "allow combining the information from multiple modules" in {
-      val module1 = new DependencyInfo
-      val module2 = new DependencyInfo
+      val module1 = new DependencyMapping
+      val module2 = new DependencyMapping
 
       val symbol1 = mkDynamicDep("foo")
       val symbol2 = mkDynamicDep("bar")
@@ -261,27 +258,23 @@ class DataflowAnalysisTest extends CompilerTest {
       val symbol1DependentIdsInModule2 = Set(genStaticDep, genStaticDep)
       val symbol3DependentIdsInModule2 = Set(genStaticDep)
 
-      module1.dependents(symbol1) = symbol1DependentIdsInModule1
-      module1.dependents(symbol2) = symbol2DependentIdsInModule1
-      module2.dependents(symbol1) = symbol1DependentIdsInModule2
-      module2.dependents(symbol3) = symbol3DependentIdsInModule2
+      module1(symbol1) = symbol1DependentIdsInModule1
+      module1(symbol2) = symbol2DependentIdsInModule1
+      module2(symbol1) = symbol1DependentIdsInModule2
+      module2(symbol3) = symbol3DependentIdsInModule2
 
       val combinedModule = module1 ++ module2
 
-      combinedModule.dependents.get(symbol1) shouldBe defined
-      combinedModule.dependents.get(symbol2) shouldBe defined
-      combinedModule.dependents.get(symbol3) shouldBe defined
+      combinedModule.get(symbol1) shouldBe defined
+      combinedModule.get(symbol2) shouldBe defined
+      combinedModule.get(symbol3) shouldBe defined
 
       val symbol1DependentIdsCombined =
         symbol1DependentIdsInModule1 ++ symbol1DependentIdsInModule2
 
-      combinedModule.dependents(symbol1) shouldEqual symbol1DependentIdsCombined
-      combinedModule.dependents(
-        symbol2
-      ) shouldEqual symbol2DependentIdsInModule1
-      combinedModule.dependents(
-        symbol3
-      ) shouldEqual symbol3DependentIdsInModule2
+      combinedModule(symbol1) shouldEqual symbol1DependentIdsCombined
+      combinedModule(symbol2) shouldEqual symbol2DependentIdsInModule1
+      combinedModule(symbol3) shouldEqual symbol3DependentIdsInModule2
     }
   }
 
