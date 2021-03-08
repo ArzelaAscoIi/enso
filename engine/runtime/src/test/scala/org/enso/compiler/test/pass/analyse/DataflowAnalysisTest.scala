@@ -382,6 +382,13 @@ class DataflowAnalysisTest extends CompilerTest {
       )
     }
 
+    "correctly identify global symbol direct dependencies" in {
+      depInfo.dependencies.getDirect(frobnicateSymbol) shouldBe empty
+      depInfo.dependencies.getDirect(ioSymbol) shouldBe empty
+      depInfo.dependencies.getDirect(printlnSymbol) shouldBe empty
+      depInfo.dependencies.getDirect(plusSymbol) shouldBe empty
+    }
+
     "correctly identify global symbol indirect dependents" in {
       depInfo.dependents.get(frobnicateSymbol) shouldEqual Some(
         Set(frobFnId, frobExprId, fnBodyId, fnId, methodId)
@@ -405,6 +412,13 @@ class DataflowAnalysisTest extends CompilerTest {
           methodId
         )
       )
+    }
+
+    "correctly identify global symbol indirect dependencies" in {
+      depInfo.dependencies.get(frobnicateSymbol) shouldBe empty
+      depInfo.dependencies.get(ioSymbol) shouldBe empty
+      depInfo.dependencies.get(printlnSymbol) shouldBe empty
+      depInfo.dependencies.get(plusSymbol) shouldBe empty
     }
 
     "correctly identify local direct dependents" in {
@@ -472,6 +486,57 @@ class DataflowAnalysisTest extends CompilerTest {
       depInfo.dependents.getDirect(frobArgCExprId) shouldEqual Some(
         Set(frobArgCId)
       )
+    }
+
+    "correctly identify local direct dependencies" in {
+      val dependencies = depInfo.dependencies
+      dependencies.getDirect(methodId) shouldEqual Some(Set(fnId))
+      dependencies.getDirect(fnId) shouldEqual Some(Set(fnBodyId))
+      dependencies.getDirect(fnBodyId) shouldEqual Some(Set(frobExprId))
+      dependencies.getDirect(fnArgAId) shouldEqual None
+      dependencies.getDirect(fnArgBId) shouldEqual None
+
+      // The `IO.println` expression
+      dependencies.getDirect(printlnExprId) shouldEqual Some(
+        Set(printlnArgIOId, printlnArgBId, printlnFnId)
+      )
+      dependencies.getDirect(printlnFnId) shouldEqual Some(Set(printlnSymbol))
+      dependencies.getDirect(printlnArgIOId) shouldEqual Some(
+        Set(printlnArgIOExprId)
+      )
+      dependencies.getDirect(printlnArgBId) shouldEqual Some(
+        Set(printlnArgBExprId)
+      )
+      dependencies.getDirect(printlnArgIOExprId) shouldEqual Some(Set(ioSymbol))
+      dependencies.getDirect(printlnArgBExprId) shouldEqual Some(Set(fnArgBId))
+
+      // The `c = ...` expression
+      dependencies.getDirect(cBindExprId) shouldEqual Some(
+        Set(cBindNameId, plusExprId)
+      )
+      dependencies.getDirect(cBindNameId) shouldEqual None
+      dependencies.getDirect(plusExprId) shouldEqual Some(
+        Set(plusExprFnId, plusExprArgAId, plusExprArgBId)
+      )
+      dependencies.getDirect(plusExprFnId) shouldEqual Some(Set(plusSymbol))
+      dependencies.getDirect(plusExprArgAId) shouldEqual Some(
+        Set(plusExprArgAExprId)
+      )
+      dependencies.getDirect(plusExprArgBId) shouldEqual Some(
+        Set(plusExprArgBExprId)
+      )
+      dependencies.getDirect(plusExprArgAExprId) shouldEqual Some(Set(fnArgAId))
+      dependencies.getDirect(plusExprArgBExprId) shouldEqual Some(Set(fnArgBId))
+
+      // The `frobnicate` expression
+      dependencies.getDirect(frobExprId) shouldEqual Some(
+        Set(frobFnId, frobArgAId, frobArgCId)
+      )
+      dependencies.getDirect(frobFnId) shouldEqual Some(Set(frobnicateSymbol))
+      dependencies.getDirect(frobArgAId) shouldEqual Some(Set(frobArgAExprId))
+      dependencies.getDirect(frobArgCId) shouldEqual Some(Set(frobArgCExprId))
+      dependencies.getDirect(frobArgAExprId) shouldEqual Some(Set(fnArgAId))
+      dependencies.getDirect(frobArgCExprId) shouldEqual Some(Set(cBindExprId))
     }
 
     "correctly identify local indirect dependents" in {
