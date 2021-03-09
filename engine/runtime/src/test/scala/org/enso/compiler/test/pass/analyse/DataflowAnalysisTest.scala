@@ -1340,7 +1340,7 @@ class DataflowAnalysisTest extends CompilerTest {
       val lamId     = mkStaticDep(ir.getId)
 
       // The info
-      val dependents = depInfo.dependents
+      val dependents   = depInfo.dependents
       val dependencies = depInfo.dependencies
 
       // Tests for dependents
@@ -1398,6 +1398,7 @@ class DataflowAnalysisTest extends CompilerTest {
       val caseExpr        = caseBlock.returnValue.asInstanceOf[IR.Case.Expr]
       val scrutinee       = caseExpr.scrutinee.asInstanceOf[IR.Name.Literal]
       val consBranch      = caseExpr.branches.head
+      val catchAllbranch  = caseExpr.branches(1)
 
       val consBranchPattern =
         consBranch.pattern.asInstanceOf[Pattern.Constructor]
@@ -1411,6 +1412,8 @@ class DataflowAnalysisTest extends CompilerTest {
 
       val consBranchExpression =
         consBranch.expression.asInstanceOf[IR.Application.Prefix]
+      val consBranchFn =
+        consBranchExpression.function.asInstanceOf[IR.Name.Literal]
       val aArg = consBranchExpression.arguments.head
         .asInstanceOf[IR.CallArgument.Specified]
       val aUse = aArg.value.asInstanceOf[IR.Name.Literal]
@@ -1418,6 +1421,9 @@ class DataflowAnalysisTest extends CompilerTest {
         .arguments(1)
         .asInstanceOf[IR.CallArgument.Specified]
       val bUse = bArg.value.asInstanceOf[IR.Name.Literal]
+
+      val consSym = mkDynamicDep("Cons")
+      val plusSym = mkDynamicDep("+")
 
       // The IDs
       val caseBlockId       = mkStaticDep(caseBlock.getId)
@@ -1427,6 +1433,7 @@ class DataflowAnalysisTest extends CompilerTest {
       val caseExprId        = mkStaticDep(caseExpr.getId)
       val scrutineeId       = mkStaticDep(scrutinee.getId)
       val consBranchId      = mkStaticDep(consBranch.getId)
+      val catchAllBranchId  = mkStaticDep(catchAllbranch.getId)
 
       val consBranchPatternId     = mkStaticDep(consBranchPattern.getId)
       val consBranchPatternConsId = mkStaticDep(consBranchPatternCons.getId)
@@ -1436,13 +1443,14 @@ class DataflowAnalysisTest extends CompilerTest {
       val consBranchBDefId        = mkStaticDep(consBranchBDef.getId)
 
       val consBranchExpressionId = mkStaticDep(consBranchExpression.getId)
+      val consBranchFnId         = mkStaticDep(consBranchFn.getId)
       val aArgId                 = mkStaticDep(aArg.getId)
       val aUseId                 = mkStaticDep(aUse.getId)
       val bArgId                 = mkStaticDep(bArg.getId)
       val bUseId                 = mkStaticDep(bUse.getId)
 
       // The info
-      val dependents = depInfo.dependents
+      val dependents   = depInfo.dependents
       val dependencies = depInfo.dependencies
 
       // Tests for dependents
@@ -1450,18 +1458,36 @@ class DataflowAnalysisTest extends CompilerTest {
       dependents.getDirect(caseExprId) shouldEqual Some(Set(caseBlockId))
       dependents.getDirect(scrutineeId) shouldEqual Some(Set(caseExprId))
       dependents.getDirect(caseBindingId) shouldEqual Some(Set(scrutineeId))
-      dependents.getDirect(caseBindingExprId) shouldEqual Some(Set(caseBindingId))
-      dependents.getDirect(caseBindingNameId) shouldEqual Some(Set(caseBindingId))
+      dependents.getDirect(caseBindingExprId) shouldEqual Some(
+        Set(caseBindingId)
+      )
+      dependents.getDirect(caseBindingNameId) shouldEqual Some(
+        Set(caseBindingId)
+      )
       dependents.getDirect(consBranchId) shouldEqual Some(Set(caseExprId))
 
-      dependents.getDirect(consBranchPatternId) shouldEqual Some(Set(consBranchId))
-      dependents.getDirect(consBranchPatternConsId) shouldEqual Some(Set(consBranchPatternId))
-      dependents.getDirect(consBranchAPatternId) shouldEqual Some(Set(consBranchPatternId))
-      dependents.getDirect(consBranchADefId) shouldEqual Some(Set(consBranchAPatternId, aUseId))
-      dependents.getDirect(consBranchBPatternId) shouldEqual Some(Set(consBranchPatternId))
-      dependents.getDirect(consBranchBDefId) shouldEqual Some(Set(consBranchBPatternId, bUseId))
+      dependents.getDirect(consBranchPatternId) shouldEqual Some(
+        Set(consBranchId)
+      )
+      dependents.getDirect(consBranchPatternConsId) shouldEqual Some(
+        Set(consBranchPatternId)
+      )
+      dependents.getDirect(consBranchAPatternId) shouldEqual Some(
+        Set(consBranchPatternId)
+      )
+      dependents.getDirect(consBranchADefId) shouldEqual Some(
+        Set(consBranchAPatternId, aUseId)
+      )
+      dependents.getDirect(consBranchBPatternId) shouldEqual Some(
+        Set(consBranchPatternId)
+      )
+      dependents.getDirect(consBranchBDefId) shouldEqual Some(
+        Set(consBranchBPatternId, bUseId)
+      )
 
-      dependents.getDirect(consBranchExpressionId) shouldEqual Some(Set(consBranchId))
+      dependents.getDirect(consBranchExpressionId) shouldEqual Some(
+        Set(consBranchId)
+      )
       dependents.getDirect(aArgId) shouldEqual Some(Set(consBranchExpressionId))
       dependents.getDirect(aUseId) shouldEqual Some(Set(aArgId))
       dependents.getDirect(bArgId) shouldEqual Some(Set(consBranchExpressionId))
@@ -1469,6 +1495,38 @@ class DataflowAnalysisTest extends CompilerTest {
 
       // Tests for dependencies
       dependencies.getDirect(caseBlockId) shouldEqual Some(Set(caseExprId))
+      dependencies.getDirect(caseBindingId) shouldEqual Some(
+        Set(caseBindingNameId, caseBindingExprId)
+      )
+      dependencies.getDirect(caseExprId) shouldEqual Some(
+        Set(scrutineeId, consBranchId, catchAllBranchId)
+      )
+      dependencies.getDirect(scrutineeId) shouldEqual Some(Set(caseBindingId))
+      dependencies.getDirect(consBranchId) shouldEqual Some(
+        Set(consBranchPatternId, consBranchExpressionId)
+      )
+
+      dependencies.getDirect(consBranchPatternId) shouldEqual Some(
+        Set(consBranchPatternConsId, consBranchAPatternId, consBranchBPatternId)
+      )
+      dependencies.getDirect(consBranchPatternConsId) shouldEqual Some(
+        Set(consSym)
+      )
+      dependencies.getDirect(consBranchAPatternId) shouldEqual Some(
+        Set(consBranchADefId)
+      )
+      dependencies.getDirect(consBranchBPatternId) shouldEqual Some(
+        Set(consBranchBDefId)
+      )
+
+      dependencies.getDirect(consBranchExpressionId) shouldEqual Some(
+        Set(aArgId, consBranchFnId, bArgId)
+      )
+      dependencies.getDirect(consBranchFnId) shouldEqual Some(Set(plusSym))
+      dependencies.getDirect(aArgId) shouldEqual Some(Set(aUseId))
+      dependencies.getDirect(aUseId) shouldEqual Some(Set(consBranchADefId))
+      dependencies.getDirect(bArgId) shouldEqual Some(Set(bUseId))
+      dependencies.getDirect(bUseId) shouldEqual Some(Set(consBranchBDefId))
     }
 
     "have the result data associated with literals" in {
