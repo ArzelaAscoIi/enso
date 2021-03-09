@@ -3,7 +3,15 @@ package org.enso.compiler.pass.analyse
 import org.enso.compiler.context.{InlineContext, ModuleContext}
 import org.enso.compiler.core.IR
 import org.enso.compiler.core.IR.Module.Scope.Definition
-import org.enso.compiler.core.IR.{Application, Case, DefinitionArgument, Error, Name, Type}
+import org.enso.compiler.core.IR.{
+  Application,
+  CallArgument,
+  Case,
+  DefinitionArgument,
+  Error,
+  Name,
+  Type
+}
 import org.enso.compiler.exception.CompilerError
 import org.enso.compiler.pass.IRPass
 import org.enso.compiler.pass.analyse.DataflowAnalysis.DependencyInfo
@@ -29,9 +37,10 @@ import scala.collection.mutable
   *
   * Additionally, it will only trigger when the following conditions hold:
   *
+  * - The annotated call takes more than one argument.
   * - All dependent names are defined in the same method.
-  * - The dependencies of the `@Auto_Parallel` computation may not be used
-  *   except for inside the annotated call.
+  * - The dependencies of the `@Auto_Parallel` computation may only be used
+  *   once.
   * - The dependencies must be able to be inlined.
   */
 object AutomaticParallelism extends IRPass {
@@ -47,12 +56,15 @@ object AutomaticParallelism extends IRPass {
     DataflowAnalysis
   )
 
+  /** The specific dependency information. */
+  type DepInfoType = DataflowAnalysis.DependencyInfo.Type
+
   /** Executes the pass on a module.
     *
     * @param ir the Enso IR to process
     * @param moduleContext a context object that contains the information needed
     *                      to process a module
-    *  @return `ir`, possibly having made transformations or annotations to that
+    * @return `ir`, possibly having made transformations or annotations to that
     *         IR.
     */
   override def runModule(
@@ -157,7 +169,9 @@ object AutomaticParallelism extends IRPass {
             processExpression(block.returnValue, mutData, newScopedData)
           block.copy(expressions = newExpressions, returnValue = newRet)
         } catch {
-          case _: RewriteException => ???
+          case _: RewriteException =>
+            println("Caught Rewrite")
+            block // TODO [AA] Do this properly
         }
       case binding: IR.Expression.Binding =>
         val newExpr =
@@ -175,23 +189,23 @@ object AutomaticParallelism extends IRPass {
     result
   }
 
-  // TODO [AA] The steps are as follows:
-  //   1. Walk over the IR, building a mapping from UUID to node along the way.
-  //   2. Get the dependency sets and ensure that they are disjoint, and not
-  //      touched by others, and do not depend on function args
-  //   3. Perform inlining.
-  //   4. Annotate the block with the parallel streams (structure TBC)
-  //   5. Emit a warning when the annotation cannot be obeyed.
-  //   6. Docs and cleanup
-  //  How do I get the inlined blocks to the right place?
-
-  private def processParallelCall(
+  private def checkParallelCall(
     app: Application.Prefix,
-    @unused mutData: MutablePassData,
-    @unused scopedData: ScopedPassData
+    mutData: MutablePassData,
+    scopedData: ScopedPassData
   ): IR.Expression = {
-    println("========== Rewriting ==========")
-    // TODO [AA] Check that the function does not depend on args
+    // Check that there are enough arguments.
+    if (app.arguments.length <= 1) {
+      val warning = IR.Warning.FailedParallelism(
+        app,
+        s"Cannot parallelize an application with ${app.arguments.length} " +
+        s"arguments."
+      )
+      app.diagnostics.add(warning)
+      return app
+    }
+
+    // Check that the incoming flows are distinct.
     val dataflow = app
       .getMetadata(DataflowAnalysis)
       .getOrElse(
@@ -199,24 +213,169 @@ object AutomaticParallelism extends IRPass {
           "Dataflow analysis metadata is required for parallelism analysis."
         )
       )
-    val args = app.arguments.collect { case a: IR.CallArgument.Specified => a }
+    val args = app.arguments.collect { case a: CallArgument.Specified => a }
+    val argDepSets = args.map(a => {
+      val dep = mkStaticDep(a)
+      dataflow.dependencies
+        .get(dep)
+        .getOrElse(
+          throw new CompilerError(
+            s"Unable to find dataflow analysis data for $a"
+          )
+        )
+    })
+    if (!flowsDistinct(argDepSets)) {
+      val warning = IR.Warning.FailedParallelism(
+        app,
+        "Arguments to the parallel call are not distinct computations."
+      )
+      app.diagnostics.add(warning)
+      return app
+    }
 
-    val firstArg = args.head
-    val dep = mkStaticDep(firstArg)
-    val flow = dataflow.dependents.get(dep)
+    // Check that the incoming flows do not depend on input arguments
+    if (dependsOnInputArguments(argDepSets, mutData)) {
+      val warning = IR.Warning.FailedParallelism(
+        app,
+        "Auto-parallel calls cannot depend on input arguments as these are " +
+        "not statically known."
+      )
+      app.diagnostics.add(warning)
+      return app
+    }
 
-    // TODO [AA] Add a way to get dependencies
+    // Check if it is safe to inline the dependencies into the flows.
+    if (!canInline(argDepSets, dataflow)) {
+      val warning = IR.Warning.FailedParallelism(
+        app,
+        "Cannot inline the dependencies of the incoming flows. They are used " +
+        "in more than one place."
+      )
+      app.diagnostics.add(warning)
+      return app
+    }
 
-    println(flow)
-    println(app.getId)
+    // Preconditions are satisfied, so perform the rewrite.
+    throw rewriteParallelCall(app, mutData, scopedData, dataflow)
+  }
+
+  // TODO [AA] The steps are as follows:
+  //   3. Perform inlining.
+  //   4. Annotate the block with the parallel streams (structure TBC)
+  //   6. Docs and cleanup
+  //  How do I get the inlined blocks to the right place? ====>>>> Throw exn
+
+  private def rewriteParallelCall(
+    app: Application.Prefix,
+    mutData: MutablePassData,
+    @unused scopedData: ScopedPassData,
+    dataflow: DataflowAnalysis.Metadata
+  ): RewriteException = {
+    println("========== Rewriting ==========")
+
+    // TODO [AA] Create a new binding to hold the intermediary. Use fresh name.
+    // TODO [AA] Inline the expressions into the binding for each arg.
+    // TODO [AA] Annotate these bindings with a ParallelExecute metadata.
+    // TODO [AA] Rewrite the app to use the bindings
+    // TODO [AA] Rewrite the expressions to the top of the tree to remove the
+    //  dependencies.
+
+    // Generate inlined and annotated bindings
+    val bindingNames = app.arguments.map(_ =>
+      mutData.context.freshNameSupply
+        .getOrElse(
+          throw new CompilerError(
+            "A fresh name supply is required for parallelism analysis."
+          )
+        )
+        .newName()
+    )
+    val bindings = bindingNames.zip(app.arguments).map { case (bindName, arg) =>
+      makeInlinedBindingFor(bindName, arg, mutData, dataflow)
+    }
+    bindings.foreach(b => println(b.showCode()))
+
+    // Rewrite the application to use the bindings
+    val newArgs = app.arguments.zip(bindingNames).map {
+      case (arg: CallArgument.Specified, bindingName) =>
+        arg.copy(value = bindingName.duplicate())
+    }
+    val newApp = app.copy(arguments = newArgs)
+    println(newApp.showCode())
+
     println("========== Done ==========")
-    app
+    RewriteException()
+  }
+
+  private def makeInlinedBindingFor(
+    bindingName: IR.Name,
+    arg: CallArgument,
+    mutData: MutablePassData,
+    dataflow: DataflowAnalysis.Metadata
+  ): IR.Expression.Binding = arg match {
+    case spec: CallArgument.Specified =>
+      val flattened = flattenExpr(spec.value, mutData, dataflow)
+      val binding   = IR.Expression.Binding(bindingName, flattened, None)
+      binding
+  }
+
+  // TODO [AA] Write the actual flattening.
+  private def flattenExpr(
+    expr: IR.Expression,
+    @unused mutData: MutablePassData,
+    @unused dataflow: DataflowAnalysis.Metadata
+  ): IR.Expression = {
+    expr match {
+      case lam: IR.Function.Lambda              => lam
+      case pre: IR.Application.Prefix           => pre
+      case force: IR.Application.Force          => force
+      case seq: IR.Application.Literal.Sequence => seq
+      case cse: IR.Case                         => cse
+      case caseBranch: IR.Case.Branch           => caseBranch
+      case block: IR.Expression.Block           => block
+      case binding: IR.Expression.Binding       => binding
+      case a => a
+    }
+  }
+
+  private def canInline(
+    dependenciesOfArgs: Seq[Set[DepInfoType]],
+    dataflow: DataflowAnalysis.Metadata
+  ): Boolean = {
+    val flatDeps = dependenciesOfArgs.flatten
+    flatDeps.forall {
+      case d: DependencyInfo.Type.Static =>
+        dataflow.dependents.getDirect(d) match {
+          case Some(s) => s.size == 1
+          case _       => false
+        }
+      case _: DependencyInfo.Type.Dynamic => true
+    }
+  }
+
+  private def dependsOnInputArguments(
+    args: Seq[Set[DepInfoType]],
+    passData: MutablePassData
+  ): Boolean = {
+    val identifiers: Seq[IR.Identifier] = args.flatMap(_.collect {
+      case s: DependencyInfo.Type.Static => s.id
+    })
+    identifiers.exists(id => passData.getDefinitionArg(id).isDefined)
+  }
+
+  private def flowsDistinct(args: Seq[Set[DepInfoType]]): Boolean = {
+    val noDynDeps = args.map(s => {
+      s.collect { case s: DependencyInfo.Type.Static => s }
+    })
+    val depsCount = noDynDeps.map(_.size).sum
+    noDynDeps.reduceLeft((l, r) => l union r).size == depsCount
   }
 
   private def mkStaticDep(ir: IR): DependencyInfo.Type.Static = {
     DependencyInfo.Type.Static(ir.getId, ir.getExternalId)
   }
 
+  // TODO [AA] Error case for annotation inside call (illegal)
   private def processApplication(
     app: IR.Application,
     mutData: MutablePassData,
@@ -232,7 +391,7 @@ object AutomaticParallelism extends IRPass {
             )
           )
         if (isParAnnotated) {
-          processParallelCall(app, mutData, scopedData)
+          checkParallelCall(app, mutData, scopedData)
         } else {
           val newFn = processExpression(function, mutData, scopedData)
           val newArgs = arguments.map {
@@ -250,10 +409,7 @@ object AutomaticParallelism extends IRPass {
         val newItems =
           sequence.items.map(processExpression(_, mutData, scopedData))
         sequence.copy(items = newItems)
-      case _: Application.Literal.Typeset =>
-        throw new CompilerError(
-          "Typeset literals not supported in parallelism analysis."
-        )
+      case lit: Application.Literal.Typeset => lit
       case _: Application.Operator =>
         throw new CompilerError(
           "Operators should be desugared to functions by the point of " +
@@ -384,7 +540,7 @@ object AutomaticParallelism extends IRPass {
       definitionArgs.get(id)
     }
 
-    /** Store the IR in the pass data.
+    /** Store the expression in the pass data.
       *
       * @param ir the IR to store
       */
@@ -392,24 +548,22 @@ object AutomaticParallelism extends IRPass {
       expressions += ir.getId -> ir
     }
 
-    /** Get the IR by the specified `id`, if it exists.
+    /** Get the expression by the specified `id`, if it exists.
       *
       * @param id the identifier to get the IR for
-      * @return the IR associated with `id`, if it exists
+      * @return the expression associated with `id`, if it exists
       */
     def getExpr(id: IR.Identifier): Option[IR.Expression] = {
       expressions.get(id)
     }
 
-    /** Unsafely gets the IR associated with `id`.
-      *
-      * This function will cause a crash if no IR exists for the provided `id`.
+    /** Get the IR by the specified `id`, if it exists.
       *
       * @param id the identifier to get the IR for
-      * @return the IR associated with `id`
+      * @return the IR associated with `id`, if it exists
       */
-    def unsafeGetIr(id: IR.Identifier): IR = {
-      this.getExpr(id).get
+    def getIr(id: IR.Identifier): Option[IR] = {
+      getDefinitionArg(id).orElse(getCallArg(id).orElse(getExpr(id)))
     }
   }
 
